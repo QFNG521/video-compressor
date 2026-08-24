@@ -319,6 +319,14 @@ async fn compress(
     let _ = fs::write(&prog_path, "");
 
     let mut cmd = Command::new(&state.ffmpeg);
+    // Windows：GUI 程序派生控制台子进程(ffmpeg.exe)默认会弹一个黑色控制台窗口，
+    // 压缩结束自动关闭——用 CREATE_NO_WINDOW 隐藏它
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd.arg("-y").arg("-i").arg(&input);
     for a in &args {
         cmd.arg(a);
