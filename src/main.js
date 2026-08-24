@@ -71,11 +71,16 @@ function itemHTML(j) {
 
   let actions = ''
   if (j.status === 'done') {
-    const pct = j.src_size ? ((1 - j.out_size / j.src_size) * 100).toFixed(1) : 0
     const ql = kind === 'image' ? (iQualLabel[j.quality] || '') : (j.encoder ? (encLabel[j.encoder] || j.encoder) : '')
     let extra = ''
     if (kind === 'image' && j.img_format === 'webp') extra = ' · WebP'
-    meta = fmt(j.src_size) + ' → ' + fmt(j.out_size) + " <span class='save'>↓ " + pct + '%</span> · ' + ql + extra
+    if (j.skipped) {
+      // 输出不小于源：保留了原文件
+      meta = fmt(j.src_size) + ' → ' + fmt(j.out_size) + " <span class='save'>未压缩（源已足够小）</span>"
+    } else {
+      const pct = j.src_size ? ((1 - j.out_size / j.src_size) * 100).toFixed(1) : 0
+      meta = fmt(j.src_size) + ' → ' + fmt(j.out_size) + " <span class='save'>↓ " + pct + '%</span> · ' + ql + extra
+    }
     const p = outPathOf(j)
     actions = "<div class='btns'>" +
               "<button class='btn' data-open='" + (p || '') + "'>打开文件</button>" +

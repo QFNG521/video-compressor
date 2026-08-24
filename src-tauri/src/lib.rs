@@ -23,6 +23,9 @@ struct Record {
     quality: String,
     img_format: String,
     created: u64,
+    // 输出不小于源 → 保留原文件（老记录无此字段，默认 false）
+    #[serde(default)]
+    skipped: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -46,6 +49,7 @@ struct CompressResult {
     out_name: String,
     out_path: String,
     error: String,
+    skipped: bool,
 }
 
 struct AppState {
@@ -247,26 +251,28 @@ fn gpu_video_args(state: &AppState) -> Option<(Vec<String>, String)> {
         .find(|e| e.contains("hevc_"))
         .or_else(|| state.gpu_encoders.iter().find(|e| e.contains("h264_")))?;
     let params: Vec<String> = match enc.as_str() {
-        "hevc_nvenc" => vec!["-preset".into(), "p5".into(), "-cq".into(), "28".into()],
-        "h264_nvenc" => vec!["-preset".into(), "p5".into(), "-cq".into(), "24".into()],
-        "hevc_qsv" => vec!["-preset".into(), "medium".into(), "-global_quality".into(), "28".into()],
-        "h264_qsv" => vec!["-preset".into(), "medium".into(), "-global_quality".into(), "24".into()],
+        // 数值按「更省体积」方向标定；输出仍比源大时由调用方回退保留原文件
+        "hevc_nvenc" => vec!["-preset".into(), "p5".into(), "-cq".into(), "30".into()],
+        "h264_nvenc" => vec!["-preset".into(), "p5".into(), "-cq".into(), "26".into()],
+        "hevc_qsv" => vec!["-preset".into(), "medium".into(), "-global_quality".into(), "30".into()],
+        "h264_qsv" => vec!["-preset".into(), "medium".into(), "-global_quality".into(), "26".into()],
         "hevc_amf" => vec![
             "-quality".into(), "quality".into(),
             "-rc".into(), "cqp".into(),
-            "-qp_i".into(), "28".into(),
-            "-qp_p".into(), "28".into(),
-            "-qp_b".into(), "28".into(),
+            "-qp_i".into(), "30".into(),
+            "-qp_p".into(), "30".into(),
+            "-qp_b".into(), "30".into(),
         ],
         "h264_amf" => vec![
             "-quality".into(), "quality".into(),
             "-rc".into(), "cqp".into(),
-            "-qp_i".into(), "24".into(),
-            "-qp_p".into(), "24".into(),
-            "-qp_b".into(), "24".into(),
+            "-qp_i".into(), "26".into(),
+            "-qp_p".into(), "26".into(),
+            "-qp_b".into(), "26".into(),
         ],
-        "hevc_videotoolbox" => vec!["-q:v".into(), "75".into()],
-        _ => vec!["-q:v".into(), "65".into()], // h264_videotoolbox 及其余
+        // VideoToolbox：q:v 越大画质越好、文件越大（与常规 qscale 相反），故调低
+        "hevc_videotoolbox" => vec!["-q:v".into(), "60".into()],
+        _ => vec!["-q:v".into(), "50".into()], // h264_videotoolbox 及其余
     };
     let short = enc.split('_').nth(1).unwrap_or("gpu").to_string();
     let mut args: Vec<String> = vec![
@@ -430,7 +436,7 @@ async fn compress(
 
     let out_exists = out_path.exists() && fs::metadata(&out_path).map(|m| m.len() > 0).unwrap_or(false);
 
-    let (status, out_size, error) = if out_exists {
+    let (status, mut out_size, error) = if out_exists {
         emit_progress(&app, &id, &name, "done", 100, &last_speed);
         (
             "done".to_string(),
@@ -445,6 +451,14 @@ async fn compress(
             "编码失败（文件可能损坏或格式不支持）".to_string(),
         )
     };
+
+    // 输出比源还大（小视频/已被高效压缩的源常见）→ 保留原文件作为结果，绝不越压越大
+    let mut skipped = false;
+    if status == "done" && src_size > 0 && out_size >= src_size {
+        let _ = fs::copy(&input, &out_path);
+        out_size = src_size;
+        skipped = true;
+    }
 
     let _ = fs::remove_file(&prog_path);
 
@@ -462,6 +476,7 @@ async fn compress(
             quality: quality.clone(),
             img_format: final_format.clone(),
             created: now_secs(),
+            skipped,
         });
     }
     save_records(&state)?;
@@ -476,6 +491,7 @@ async fn compress(
         out_name,
         out_path: out_path.to_string_lossy().to_string(),
         error,
+        skipped,
     })
 }
 
