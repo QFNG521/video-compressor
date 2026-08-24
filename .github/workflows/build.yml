@@ -1,0 +1,78 @@
+name: 构建轻压
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-macos:
+    name: macOS (arm64)
+    # macos-14 = Apple Silicon GA runner，匹配签入的 arm64 ffmpeg 资源
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri'
+
+      - run: npm ci
+
+      - name: 打包 .app
+        run: npm run tauri build -- --bundles app
+
+      - name: 打包 DMG（CI 无 GUI 环境偶发失败，不影响 .app 交付）
+        continue-on-error: true
+        run: npm run tauri build -- --bundles dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qingya-macos
+          path: |
+            src-tauri/target/release/bundle/macos/*.app
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: warn
+
+  build-windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri'
+
+      - name: 准备 Windows 版 ffmpeg（BtbN 静态版，含 libx265 + libwebp）
+        shell: bash
+        run: |
+          # 仓库里签入的是 macOS ffmpeg，替换为 Windows 静态版
+          rm -rf src-tauri/ffmpeg/libs src-tauri/ffmpeg/ffmpeg
+          curl -L --retry 3 -o /tmp/ffmpeg.zip \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+          unzip -q -o /tmp/ffmpeg.zip -d /tmp/ffmpeg_extract
+          cp /tmp/ffmpeg_extract/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe src-tauri/ffmpeg/ffmpeg.exe
+          ls -lh src-tauri/ffmpeg/
+
+      - run: npm ci
+
+      - name: 打包 NSIS 安装器
+        run: npm run tauri build -- --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qingya-windows
+          path: src-tauri/target/release/bundle/nsis/*.exe

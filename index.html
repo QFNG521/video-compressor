@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>轻压 · 本地视频/图片压缩工具</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f6f8fb; color: #1a2233; min-height: 100vh;
+    padding: 32px 16px 60px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  .title-bar { display: flex; align-items: center; gap: 16px; }
+  .logo {
+    width: 52px; height: 52px; border-radius: 14px; flex-shrink: 0;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; box-shadow: 0 6px 16px rgba(79,70,229,.25);
+  }
+  h1 { font-size: 20px; font-weight: 700; }
+  .sub { font-size: 13px; color: #6b7280; margin-top: 3px; }
+  .clear-all {
+    border: 1.5px solid #e5e9f0; background: #fff; color: #6b7280;
+    border-radius: 10px; padding: 8px 14px; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .clear-all:hover { border-color: #fca5a5; color: #dc2626; }
+  .warn {
+    background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+    border-radius: 12px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px;
+  }
+  .card {
+    background: #fff; border: 1px solid #e5e9f0; border-radius: 16px;
+    padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(16,24,40,.04);
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    border: 1.5px solid #e5e9f0; background: #fff; color: #4b5563; border-radius: 10px;
+    padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all .15s;
+  }
+  .tab.active { border-color: #4f46e5; background: #eef2ff; color: #4f46e5; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .setting-row { display: flex; gap: 28px; flex-wrap: wrap; }
+  .setting-group { flex: 1; min-width: 220px; }
+  .setting-label { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 10px; }
+  .options { display: flex; gap: 8px; flex-wrap: wrap; }
+  .opt {
+    border: 1.5px solid #e5e9f0; background: #fff; color: #4b5563;
+    border-radius: 10px; padding: 8px 14px; font-size: 13px; cursor: pointer; transition: all .15s;
+  }
+  .opt:hover { border-color: #c7d0dd; }
+  .opt.active { border-color: #4f46e5; background: #eef2ff; color: #4f46e5; font-weight: 600; }
+  .opt .tag { display: block; font-size: 11px; color: #9ca3af; font-weight: 400; margin-top: 2px; }
+  .opt.active .tag { color: #818cf8; }
+  .tip { font-size: 12px; color: #9ca3af; margin-top: 14px; line-height: 1.7; }
+  .drop {
+    background: #fff; border: 2px dashed #c7d0dd; border-radius: 16px;
+    padding: 40px 20px; text-align: center; cursor: pointer; transition: all .15s; margin-top: 4px;
+  }
+  .drop:hover { border-color: #a5b4fc; }
+  .drop.over { border-color: #4f46e5; background: #eef2ff; }
+  .drop-icon { font-size: 34px; margin-bottom: 8px; }
+  .drop p { font-size: 14px; color: #374151; }
+  .drop .link { color: #4f46e5; font-weight: 600; }
+  .drop .formats { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+  #queue { margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .item {
+    background: #fff; border: 1px solid #e5e9f0; border-radius: 14px;
+    padding: 16px 18px; box-shadow: 0 1px 3px rgba(16,24,40,.04); position: relative;
+  }
+  .row1 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .name { font-size: 14px; font-weight: 600; word-break: break-all; }
+  .kind { font-size: 12px; }
+  .chip {
+    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
+  }
+  .chip.queued { background: #f3f4f6; color: #6b7280; }
+  .chip.running { background: #eef2ff; color: #4f46e5; }
+  .chip.done { background: #ecfdf5; color: #059669; }
+  .chip.error { background: #fef2f2; color: #dc2626; }
+  .bar { height: 8px; background: #eef0f4; border-radius: 999px; overflow: hidden; margin: 12px 0 8px; }
+  .fill { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #8b5cf6); transition: width .3s; }
+  .fill.done { background: linear-gradient(90deg, #10b981, #34d399); }
+  .fill.upload { background: linear-gradient(90deg, #0ea5e9, #38bdf8); }
+  .fill.error { background: #ef4444; }
+  .meta { font-size: 12px; color: #6b7280; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .meta .save { color: #059669; font-weight: 600; }
+  .btn {
+    display: inline-block; margin-top: 10px; margin-right: 8px; background: #4f46e5; color: #fff;
+    border: none; border-radius: 10px; padding: 8px 18px; font-size: 13px;
+    font-weight: 600; cursor: pointer; text-decoration: none;
+  }
+  .btn:hover { background: #4338ca; }
+  .btn.ghost { background: #eef2ff; color: #4f46e5; }
+  .btn.ghost:hover { background: #e0e7ff; }
+  .btns { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btns .btn { margin-top: 0; margin-right: 0; }
+  .del {
+    width: 24px; height: 24px; border-radius: 50%;
+    border: none; background: #f3f4f6; color: #9ca3af; font-size: 16px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-left: auto;
+  }
+  .del:hover { background: #fee2e2; color: #dc2626; }
+  footer { font-size: 12px; color: #9ca3af; text-align: center; margin-top: 26px; line-height: 1.8; }
+  .empty { text-align: center; color: #9ca3af; font-size: 13px; padding: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title-bar">
+      <div class="logo">🗜️</div>
+      <div>
+        <h1>轻压</h1>
+        <p class="sub">本地视频/图片压缩 · 恒定质量编码，全程本地处理，不上传云端</p>
+      </div>
+    </div>
+    <button class="clear-all" id="clearAll" title="清空所有压缩记录">清空记录</button>
+  </header>
+
+  <div class="warn" id="envWarn" hidden>⚠️ 未检测到 ffmpeg，请确认程序完整（ffmpeg 应随应用一起打包）。</div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="video">🎬 视频压缩</button>
+    <button class="tab" data-tab="image">🖼️ 图片压缩</button>
+  </div>
+
+  <!-- 视频面板 -->
+  <section class="panel active card" id="panel-video">
+    <div class="setting-row">
+      <div class="setting-group">
+        <div class="setting-label">编码器</div>
+        <div class="options" id="encOpt">
+          <button class="opt active" data-v="x265">H.265<span class="tag">更小体积 · 推荐</span></button>
+          <button class="opt" data-v="x264">H.264<span class="tag">兼容性最佳</span></button>
+        </div>
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">画质</div>
+        <div class="options" id="qOpt">
+          <button class="opt" data-v="lossless">视觉无损</button>
+          <button class="opt active" data-v="high">高画质<span class="tag">推荐</span></button>
+          <button class="opt" data-v="compact">高压缩</button>
+        </div>
+      </div>
+    </div>
+    <p class="tip">采用 CRF 恒定质量模式：分辨率、帧率、音轨全部保留，只去掉冗余数据。<b>「高画质」档肉眼与原片无差别</b>，通常体积减少 50%–70%。H.265 体积更小，macOS / iPhone 及近年设备均可播放；若需在老旧设备或个别 Windows 播放器播放，请选 H.264。</p>
+    <div class="drop" id="dropVideo">
+      <div class="drop-icon">⬇️</div>
+      <p>把视频拖到此处，或 <span class="link">点击选择</span></p>
+      <p class="formats">支持 MP4 / MOV / MKV / AVI / FLV / WMV / TS 等</p>
+    </div>
+  </section>
+
+  <!-- 图片面板 -->
+  <section class="panel card" id="panel-image">
+    <div class="setting-row">
+      <div class="setting-group">
+        <div class="setting-label">画质</div>
+        <div class="options" id="iqOpt">
+          <button class="opt active" data-v="high">高画质<span class="tag">推荐</span></button>
+          <button class="opt" data-v="balanced">均衡</button>
+          <button class="opt" data-v="compact">高压缩</button>
+        </div>
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">输出格式</div>
+        <div class="options" id="ifOpt">
+          <button class="opt active" data-v="same">保持原格式</button>
+          <button class="opt" data-v="webp">转 WebP<span class="tag">体积更小</span></button>
+        </div>
+      </div>
+    </div>
+    <p class="tip">按质量重编码：分辨率不变，仅压缩冗余数据，画质几乎无损。「保持原格式」体积适中；<b>「转 WebP」能再小一大截</b>，适合网页 / 分享。PNG 如需更小建议选 WebP。</p>
+    <div class="drop" id="dropImage">
+      <div class="drop-icon">🖼️</div>
+      <p>把图片拖到此处，或 <span class="link">点击选择</span></p>
+      <p class="formats">支持 JPG / PNG / WebP / BMP / TIFF</p>
+    </div>
+  </section>
+
+  <div id="queue"></div>
+
+  <footer>
+    压缩完成后的文件保存在应用数据目录的 <b>compressed</b> 文件夹，可点「在文件夹中显示」直接取用。<br>
+    多个文件会自动排队依次压缩；记录会保留，可单条删除或一键清空。
+  </footer>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
