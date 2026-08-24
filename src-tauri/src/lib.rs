@@ -53,6 +53,7 @@ struct AppState {
     data_dir: PathBuf,
     output_dir: PathBuf,
     ffmpeg: PathBuf,
+    gpu_encoders: Vec<String>,
 }
 
 // ---------------- 记录持久化 ----------------
@@ -102,7 +103,8 @@ fn env_info(state: State<AppState>) -> serde_json::Value {
     serde_json::json!({
         "ffmpeg": true,
         "webp": webp,
-        "output_dir": state.output_dir.to_string_lossy()
+        "output_dir": state.output_dir.to_string_lossy(),
+        "gpu_encoders": state.gpu_encoders
     })
 }
 
@@ -196,6 +198,95 @@ fn unique_name(state: &AppState, stem: &str, suffix: &str) -> String {
     out_name
 }
 
+/// CPU 视频编码参数（x265/x264）
+fn cpu_video_args(encoder: &str, quality: &str) -> Result<(Vec<String>, String), String> {
+    let crf: i32 = match (encoder, quality) {
+        ("x265", "lossless") => 16,
+        ("x265", "high") => 20,
+        ("x265", "compact") => 24,
+        (_, "lossless") => 15,
+        (_, "high") => 18,
+        (_, "compact") => 22,
+        _ => 20,
+    };
+    let mut args: Vec<String> = vec!["-map".into(), "0:v:0".into(), "-map".into(), "0:a?".into()];
+    if encoder == "x265" {
+        args.extend([
+            "-c:v".into(),
+            "libx265".into(),
+            "-preset".into(),
+            "fast".into(),
+            "-crf".into(),
+            crf.to_string(),
+            "-tag:v".into(),
+            "hvc1".into(),
+        ]);
+    } else {
+        args.extend([
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            "medium".into(),
+            "-crf".into(),
+            crf.to_string(),
+        ]);
+    }
+    args.extend(["-pix_fmt".into(), "yuv420p".into()]);
+    // 不探测音轨，统一重编码为 aac 160k（对所有源安全可用）
+    args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "160k".into()]);
+    args.extend(["-movflags".into(), "+faststart".into()]);
+    let label = if encoder == "x265" { "x265".to_string() } else { "x264".to_string() };
+    Ok((args, label))
+}
+
+/// GPU 视频编码参数：按本机可用编码器选择（优先 HEVC），返回 (args, 编码器短名)
+fn gpu_video_args(state: &AppState) -> Option<(Vec<String>, String)> {
+    let enc = state
+        .gpu_encoders
+        .iter()
+        .find(|e| e.contains("hevc_"))
+        .or_else(|| state.gpu_encoders.iter().find(|e| e.contains("h264_")))?;
+    let params: Vec<String> = match enc.as_str() {
+        "hevc_nvenc" => vec!["-preset".into(), "p5".into(), "-cq".into(), "28".into()],
+        "h264_nvenc" => vec!["-preset".into(), "p5".into(), "-cq".into(), "24".into()],
+        "hevc_qsv" => vec!["-preset".into(), "medium".into(), "-global_quality".into(), "28".into()],
+        "h264_qsv" => vec!["-preset".into(), "medium".into(), "-global_quality".into(), "24".into()],
+        "hevc_amf" => vec![
+            "-quality".into(), "quality".into(),
+            "-rc".into(), "cqp".into(),
+            "-qp_i".into(), "28".into(),
+            "-qp_p".into(), "28".into(),
+            "-qp_b".into(), "28".into(),
+        ],
+        "h264_amf" => vec![
+            "-quality".into(), "quality".into(),
+            "-rc".into(), "cqp".into(),
+            "-qp_i".into(), "24".into(),
+            "-qp_p".into(), "24".into(),
+            "-qp_b".into(), "24".into(),
+        ],
+        "hevc_videotoolbox" => vec!["-q:v".into(), "75".into()],
+        _ => vec!["-q:v".into(), "65".into()], // h264_videotoolbox 及其余
+    };
+    let short = enc.split('_').nth(1).unwrap_or("gpu").to_string();
+    let mut args: Vec<String> = vec![
+        "-map".into(),
+        "0:v:0".into(),
+        "-map".into(),
+        "0:a?".into(),
+        "-c:v".into(),
+        enc.clone(),
+    ];
+    args.extend(params);
+    if enc.starts_with("hevc_") {
+        args.extend(["-tag:v".into(), "hvc1".into()]);
+    }
+    args.extend(["-pix_fmt".into(), "yuv420p".into()]);
+    args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "160k".into()]);
+    args.extend(["-movflags".into(), "+faststart".into()]);
+    Some((args, short))
+}
+
 // ---------------- 构造 ffmpeg 参数（复刻 Python 端逻辑） ----------------
 fn build_args(
     state: &AppState,
@@ -204,7 +295,7 @@ fn build_args(
     encoder: &str,
     quality: &str,
     img_format: &str,
-) -> Result<(PathBuf, String, Vec<String>, String), String> {
+) -> Result<(PathBuf, String, Vec<String>, String, String), String> {
     let stem = input
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -247,47 +338,21 @@ fn build_args(
         } else {
             "same".to_string()
         };
-        Ok((out_path, out_name, args, final_format))
+        Ok((out_path, out_name, args, final_format, String::new()))
     } else {
         // 视频
-        let crf: i32 = match (encoder, quality) {
-            ("x265", "lossless") => 16,
-            ("x265", "high") => 20,
-            ("x265", "compact") => 24,
-            (_, "lossless") => 15,
-            (_, "high") => 18,
-            (_, "compact") => 22,
-            _ => 20,
-        };
         let out_name = unique_name(state, &stem, ".mp4");
         let out_path = state.output_dir.join(&out_name);
-        let mut args: Vec<String> = vec!["-map".into(), "0:v:0".into(), "-map".into(), "0:a?".into()];
-        if encoder == "x265" {
-            args.extend([
-                "-c:v".into(),
-                "libx265".into(),
-                "-preset".into(),
-                "fast".into(),
-                "-crf".into(),
-                crf.to_string(),
-                "-tag:v".into(),
-                "hvc1".into(),
-            ]);
+        let (args, enc_label) = if encoder == "gpu" {
+            match gpu_video_args(state) {
+                Some((a, l)) => (a, l),
+                // 无可用 GPU 编码器 → 回退 H.265（压缩率优先）
+                None => cpu_video_args("x265", quality)?,
+            }
         } else {
-            args.extend([
-                "-c:v".into(),
-                "libx264".into(),
-                "-preset".into(),
-                "medium".into(),
-                "-crf".into(),
-                crf.to_string(),
-            ]);
-        }
-        args.extend(["-pix_fmt".into(), "yuv420p".into()]);
-        // 不探测音轨，统一重编码为 aac 160k（对所有源安全可用）
-        args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "160k".into()]);
-        args.extend(["-movflags".into(), "+faststart".into()]);
-        Ok((out_path, out_name, args, String::new()))
+            cpu_video_args(encoder, quality)?
+        };
+        Ok((out_path, out_name, args, String::new(), enc_label))
     }
 }
 
@@ -310,7 +375,7 @@ async fn compress(
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".into());
 
-    let (out_path, out_name, args, final_format) =
+    let (out_path, out_name, args, final_format, resolved_enc) =
         build_args(&state, &input, &kind, &encoder, &quality, &img_format)?;
 
     emit_progress(&app, &id, &name, "running", 0, "");
@@ -393,7 +458,7 @@ async fn compress(
             src_size,
             out_size,
             out_name: out_name.clone(),
-            encoder: encoder.clone(),
+            encoder: resolved_enc.clone(),
             quality: quality.clone(),
             img_format: final_format.clone(),
             created: now_secs(),
@@ -434,11 +499,25 @@ pub fn run() {
             let output_dir = data_dir.join("compressed");
             fs::create_dir_all(&output_dir).ok();
             let records = load_records(&data_dir, &output_dir);
+            // 探测本机可用的 GPU 硬件编码器（按优先级：NVIDIA > Intel QSV > AMD > Apple）
+            let mut gpu_encoders = Vec::new();
+            if let Ok(out) = Command::new(&ffmpeg).args(["-hide_banner", "-encoders"]).output() {
+                let txt = String::from_utf8_lossy(&out.stdout);
+                for name in [
+                    "hevc_nvenc", "h264_nvenc", "hevc_qsv", "h264_qsv",
+                    "hevc_amf", "h264_amf", "hevc_videotoolbox", "h264_videotoolbox",
+                ] {
+                    if txt.contains(name) {
+                        gpu_encoders.push(name.to_string());
+                    }
+                }
+            }
             app.manage(AppState {
                 records: Mutex::new(records),
                 data_dir,
                 output_dir,
                 ffmpeg,
+                gpu_encoders,
             });
             Ok(())
         })

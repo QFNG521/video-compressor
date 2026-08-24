@@ -4,8 +4,12 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
 
-const settings = { video: { encoder: 'x265', quality: 'high' }, image: { quality: 'high', img_format: 'same' } }
-const encLabel = { x265: 'H.265', x264: 'H.264' }
+const settings = { video: { encoder: 'gpu', quality: 'high' }, image: { quality: 'high', img_format: 'same' } }
+const encLabel = {
+  x265: 'H.265', x264: 'H.264',
+  nvenc: '显卡·NVENC', qsv: '显卡·QSV', amf: '显卡·AMF', videotoolbox: '显卡·VideoToolbox',
+  gpu: '显卡加速',
+}
 const vQualLabel = { lossless: '视觉无损', high: '高画质', compact: '高压缩' }
 const iQualLabel = { high: '高画质', balanced: '均衡', compact: '高压缩' }
 const kindLabel = { video: '🎬', image: '🖼️' }
@@ -189,6 +193,14 @@ async function loadRecords() {
       const wb = document.querySelector("#ifOpt .opt[data-v='webp']")
       if (wb) wb.style.display = 'none'
       settings.image.img_format = 'same'
+    }
+    // 无 GPU 编码器时隐藏「显卡加速」并回退到 H.265
+    const gpus = env.gpu_encoders || []
+    const gpuBtn = document.querySelector("#encOpt .opt[data-v='gpu']")
+    if (!gpus.length && gpuBtn) {
+      gpuBtn.style.display = 'none'
+      if (settings.video.encoder === 'gpu') settings.video.encoder = 'x265'
+      document.querySelectorAll('#encOpt .opt').forEach(b => b.classList.toggle('active', b.dataset.v === settings.video.encoder))
     }
   } catch (e) { /* 忽略 */ }
   loadRecords()

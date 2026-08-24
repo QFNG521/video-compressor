@@ -135,7 +135,8 @@
       <div class="setting-group">
         <div class="setting-label">编码器</div>
         <div class="options" id="encOpt">
-          <button class="opt active" data-v="x265">H.265<span class="tag">更小体积 · 推荐</span></button>
+          <button class="opt active" data-v="gpu">显卡加速<span class="tag">快 5-20 倍 · 默认</span></button>
+          <button class="opt" data-v="x265">H.265<span class="tag">更小体积</span></button>
           <button class="opt" data-v="x264">H.264<span class="tag">兼容性最佳</span></button>
         </div>
       </div>
@@ -148,7 +149,7 @@
         </div>
       </div>
     </div>
-    <p class="tip">采用 CRF 恒定质量模式：分辨率、帧率、音轨全部保留，只去掉冗余数据。<b>「高画质」档肉眼与原片无差别</b>，通常体积减少 50%–70%。H.265 体积更小，macOS / iPhone 及近年设备均可播放；若需在老旧设备或个别 Windows 播放器播放，请选 H.264。</p>
+    <p class="tip">视频采用恒定质量模式：分辨率、帧率、音轨全部保留，只去掉冗余数据。<b>「显卡加速」用本机 GPU（NVIDIA / Intel 核显 / AMD / Apple 芯片）编码，速度快 5–20 倍</b>，适合赶时间；追求最小体积请用 H.265。GPU 不可用时自动回退 CPU，画质不变。</p>
     <div class="drop" id="dropVideo">
       <div class="drop-icon">⬇️</div>
       <p>把视频拖到此处，或 <span class="link">点击选择</span></p>
